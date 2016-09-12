@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -10,13 +9,19 @@ namespace NuGet.XPlat.FuncTest
 {
     internal class DotnetCliUtil
     {
-        private const string _dotnetCliBinary = @"dotnet";
-        private const string _dotnetCliExe = @"dotnet.exe";
+        private const string DotnetCliBinary = "dotnet";
+        private const string DotnetCliExe = "dotnet.exe";
+        private const string XPlatDll = "NuGet.CommandLine.XPlat.dll";
+        private static readonly string XPlatDllRelativePath = Path.Combine(
+            "NuGet.Core", "NuGet.CommandLine.XPlat", "bin", "release", "netcoreapp1.0", XPlatDll);
+        private static readonly string BuildOutputDirectory;
+        private static readonly string[] TestFileNames = new string[] { "file1.txt", "file2.txt" };
 
-        private static string _xplatDll = Path.Combine("NuGet.Core", "NuGet.CommandLine.XPlat", "bin",
-                                                       "release", "netcoreapp1.0", "NuGet.CommandLine.XPlat.dll");
-
-        private static List<string> _fileNames = new List<string> { "file1.txt", "file2.txt" };
+        static DotnetCliUtil()
+        {
+            var assemblyLocation = typeof(DotnetCliUtil).GetTypeInfo().Assembly.Location;
+            BuildOutputDirectory = Path.GetDirectoryName(assemblyLocation);
+        }
 
         /// <summary>
         /// Provides the path to dotnet cli on the test machine.
@@ -29,28 +34,26 @@ namespace NuGet.XPlat.FuncTest
         public static string GetDotnetCli()
         {
             var currentDirInfo = new DirectoryInfo(Directory.GetCurrentDirectory());
-            var parentDirInfo = currentDirInfo.Parent;
-            while (parentDirInfo != null)
+            while (currentDirInfo != null)
             {
-                foreach (var dir in parentDirInfo.EnumerateDirectories())
+                foreach (var dir in currentDirInfo.EnumerateDirectories())
                 {
                     if (StringComparer.Ordinal.Equals(dir.Name, "cli"))
                     {
                         var dotnetCli = "";
-                        dotnetCli = Path.Combine(dir.FullName, _dotnetCliExe);
+                        dotnetCli = Path.Combine(dir.FullName, DotnetCliExe);
                         if (File.Exists(dotnetCli))
                         {
                             return dotnetCli;
                         }
-                        dotnetCli = Path.Combine(dir.FullName, _dotnetCliBinary);
+                        dotnetCli = Path.Combine(dir.FullName, DotnetCliBinary);
                         if (File.Exists(dotnetCli))
                         {
                             return dotnetCli;
                         }
                     }
                 }
-                currentDirInfo = new DirectoryInfo(parentDirInfo.FullName);
-                parentDirInfo = currentDirInfo.Parent;
+                currentDirInfo = currentDirInfo.Parent;
             }
             return null;
         }
@@ -61,7 +64,7 @@ namespace NuGet.XPlat.FuncTest
         /// <param name="path">Path which needs to be populated with dummy files</param>
         public static void CreateTestFiles(string path)
         {
-            foreach (var fileName in _fileNames)
+            foreach (var fileName in TestFileNames)
             {
                 File.Create(Path.Combine(path, fileName)).Dispose();
             }
@@ -86,12 +89,12 @@ namespace NuGet.XPlat.FuncTest
             var files = Directory.GetFiles(path)
                                  .Select(filepath => Path.GetFileName(filepath))
                                  .ToArray();
-            foreach (var filename in _fileNames)
+            foreach (var filename in TestFileNames)
             {
                 Assert.True(Array.Exists(files, element => element == filename));
             }
 
-            Assert.Equal(files.Count(), _fileNames.Count);
+            Assert.Equal(files.Count(), TestFileNames.Length);
         }
 
         /// <summary>
@@ -105,6 +108,12 @@ namespace NuGet.XPlat.FuncTest
         /// </returns>
         public static string GetXplatDll()
         {
+            var xplatDll = Path.Combine(BuildOutputDirectory, XPlatDll);
+            if (File.Exists(xplatDll))
+            {
+                return xplatDll;
+            }
+
             var currentDirInfo = new DirectoryInfo(Directory.GetCurrentDirectory());
             var parentDirInfo = currentDirInfo.Parent;
             while (parentDirInfo != null)
@@ -113,7 +122,7 @@ namespace NuGet.XPlat.FuncTest
                 {
                     if (StringComparer.Ordinal.Equals(dir.Name, "src"))
                     {
-                        var xplatDll = Path.Combine(dir.FullName, _xplatDll);
+                        xplatDll = Path.Combine(dir.FullName, XPlatDllRelativePath);
                         if (File.Exists(xplatDll))
                         {
                             return xplatDll;
@@ -135,7 +144,7 @@ namespace NuGet.XPlat.FuncTest
         {
             Assert.True(
                 result.Item1 == 0,
-                "nuget DID NOT SUCCEED: Ouput is " + result.Item2 + ". Error is " + result.Item3);
+                $"Command DID NOT SUCCEED. Ouput is: \"{result.Item2}\". Error is: \"{result.Item3}\"");
 
             if (!string.IsNullOrEmpty(expectedOutputMessage))
             {
@@ -155,11 +164,11 @@ namespace NuGet.XPlat.FuncTest
         {
             Assert.True(
                 result.Item1 != 0,
-                "nuget DID NOT FAIL: Ouput is " + result.Item2 + ". Error is " + result.Item3);
+                $"Command DID NOT FAIL. Ouput is: \"{result.Item2}\". Error is: \"{result.Item3}\"");
 
             Assert.True(
                 result.Item2.Contains(expectedErrorMessage),
-                "Expected error is " + expectedErrorMessage + ". Actual error is " + result.Item2);
+                $"Expected error is: \"{expectedErrorMessage}\". Actual error is: \"{result.Item3}\". Ouput is: \"{result.Item2}\".");
         }
     }
 }

@@ -43,7 +43,10 @@ Function Reset-Colors {
     $host.ui.rawui.ForegroundColor = $OrigFgColor
 }
 
-### Functions ###
+function Format-TeamCityMessage([string]$Text) {
+    $Text.Replace("|", "||").Replace("'", "|'").Replace("[", "|[").Replace("]", "|]").Replace("`n", "|n").Replace("`r", "|r")
+}
+
 Function Trace-Log($TraceMessage = '') {
     Write-Host "[$(Trace-Time)]`t$TraceMessage" -ForegroundColor Cyan
 }
@@ -83,6 +86,7 @@ Function Format-ElapsedTime($ElapsedTime) {
 
 Function Invoke-BuildStep {
     [CmdletBinding()]
+    [Alias('ibs')]
     param(
         [Parameter(Mandatory=$True)]
         [string]$BuildStep,
@@ -102,6 +106,7 @@ Function Invoke-BuildStep {
         Trace-Log "[BEGIN] $BuildStep"
         $sw = [Diagnostics.Stopwatch]::StartNew()
         $completed = $false
+        $PwdBefore = $PWD
 
         try {
             Invoke-Command $Expression -ArgumentList $Arguments -ErrorVariable err
@@ -110,6 +115,9 @@ Function Invoke-BuildStep {
         finally {
             $sw.Stop()
             Reset-Colors
+            if ($PWD -ne $PwdBefore) {
+                cd $PwdBefore
+            }
             if (-not $err -and $completed) {
                 Trace-Log "[DONE +$(Format-ElapsedTime $sw.Elapsed)] $BuildStep"
             }
@@ -138,6 +146,7 @@ Function Update-Submodules {
     if (-not $VerbosePreference) {
         $opts += '--quiet'
     }
+
     Trace-Log 'Updating and initializing submodules'
     Trace-Log "git $opts"
     & git $opts 2>&1
@@ -370,22 +379,30 @@ Function Restore-SolutionPackages{
 
 # Restore nuget.core.sln projects
 Function Restore-XProjects {
+    [CmdletBinding()]
+    param(
+        [parameter(ValueFromPipeline=$True, Mandatory=$True, Position=0)]
+        [string[]]$XProjectLocations
+    )
+    end {
+        $xprojects = $Input | Join-Path -ChildPath project.json -Resolve
+        $xprojects | %{
+            $opts = 'restore', $_
+            if (-not $VerbosePreference) {
+                $opts += '--verbosity', 'minimal'
+            }
 
-    $opts = 'restore', "src\NuGet.Core", "test\NuGet.Core.Tests", "test\NuGet.Core.FuncTests"
-    if (-not $VerbosePreference) {
-        $opts += '--verbosity', 'minimal'
-    }
-
-    Trace-Log "Restoring packages for xprojs"
-    Trace-Log "$dotnetExe $opts"
-    & $dotnetExe $opts
-    if (-not $?) {
-        Error-Log "Restore failed @""$_"". Code: $LASTEXITCODE"
+            Trace-Log "$DotNetExe $opts"
+            & $DotNetExe $opts
+            if (-not $?) {
+                Error-Log "Restore failed @""$_"". Code: $LASTEXITCODE"
+            }
+        }
     }
 }
 
-Function Find-XProjects($XProjectsLocation) {
-    Get-ChildItem $XProjectsLocation -Recurse -Filter '*.xproj' |`
+Function Find-XProjects([string]$XProjectsLocation) {
+    Get-ChildItem $XProjectsLocation -Recurse -Filter '*.xproj' |
         %{ Split-Path $_.FullName -Parent }
 }
 
@@ -433,7 +450,6 @@ Function Invoke-DotnetPack {
             }
         }
     }
-    End { }
 }
 
 Function Build-CoreProjects {
@@ -442,21 +458,101 @@ Function Build-CoreProjects {
         [string]$Configuration = $DefaultConfiguration,
         [string]$ReleaseLabel = $DefaultReleaseLabel,
         [int]$BuildNumber = (Get-BuildNumber),
-        [switch]$SkipRestore,
-        [switch]$Fast
+        [switch]$SkipRestore
     )
-    $XProjectsLocation = Join-Path $NuGetClientRoot src\NuGet.Core
+    $XProjectsLocation = Join-Path $NuGetClientRoot src\NuGet.Core -Resolve
+    $xprojects = Find-XProjects $XProjectsLocation
 
     if (-not $SkipRestore) {
-        Restore-XProjects $XProjectsLocation -Fast:$Fast
+        $xprojects | Restore-XProjects
     }
 
-    $xprojects = Find-XProjects $XProjectsLocation
     $xprojects | Invoke-DotnetPack -config $Configuration -label $ReleaseLabel -build $BuildNumber -out $Artifacts
 
     ## Moving nupkgs
     Trace-Log "Moving the packages to $Nupkgs"
     Get-ChildItem "${Artifacts}\*.nupkg" -Recurse | % { Move-Item $_ $Nupkgs -Force }
+}
+
+Function Test-XProjectCoreClr {
+    [CmdletBinding()]
+    param(
+        [string]$XProjectLocation,
+        [string]$Configuration = $DefaultConfiguration
+    )
+    $opts = @()
+
+    if ($VerbosePreference) {
+        $opts += '-v'
+    }
+
+    $opts += 'test', '--configuration', $Configuration, '--framework', 'netcoreapp1.0'
+    $opts += '-notrait', 'Platform=Linux', '-notrait', 'Platform=Darwin'
+
+    if ($VerbosePreference) {
+        $opts += '-verbose'
+    }
+
+    pushd $XProjectLocation
+
+    try {
+        Trace-Log "$DotNetExe $opts"
+        & $DotNetExe $opts
+    }
+    finally {
+        popd
+    }
+
+    if ($LASTEXITCODE -ne 0) {
+        Error-Log "Tests failed @""$XProjectLocation"" on CoreCLR. Code: $LASTEXITCODE"
+    }
+}
+
+Function Test-XProjectClr {
+    [CmdletBinding()]
+    param(
+        [string]$XProjectLocation,
+        [string]$Configuration = $DefaultConfiguration
+    )
+    # Build
+    $opts = @()
+
+    if ($VerbosePreference) {
+        $opts += '-v'
+    }
+
+    $opts += 'build', '--configuration', $Configuration, '--runtime', 'win7-x64'
+
+    pushd $XProjectLocation
+
+    try {
+        Trace-Log "$DotNetExe $opts"
+        & $DotNetExe $opts
+    }
+    finally {
+        popd
+    }
+
+    if ($LASTEXITCODE -ne 0) {
+        Error-Log "Build failed @""$_"" on CLR. Code: $LASTEXITCODE"
+    }
+    else {
+        $directoryName = Split-Path $_ -Leaf
+        $htmlOutput = Join-Path $XProjectLocation "bin\$Configuration\net46\win7-x64\xunit.results.html"
+        $desktopTestAssembly = Join-Path $XProjectLocation "bin\${Configuration}\net46\win7-x64\${directoryName}.dll"
+        $opts = $desktopTestAssembly, '-html', $htmlOutput
+        $opts += '-notrait', 'Platform=Linux', '-notrait', 'Platform=Darwin'
+
+        if ($VerbosePreference) {
+            $opts += '-verbose'
+        }
+
+        Trace-Log "$XunitConsole $opts"
+        & $XunitConsole $opts
+        if (-not $?) {
+            Error-Log "Tests failed @""$XProjectLocation"" on CLR. Code: $LASTEXITCODE"
+        }
+    }
 }
 
 Function Test-XProject {
@@ -468,75 +564,26 @@ Function Test-XProject {
     )
     Process {
         $XProjectLocations | Resolve-Path | %{
-            Trace-Log "Running tests in ""$_"""
-
-            $directoryName = Split-Path $_ -Leaf
-
-            pushd $_
-
-            $xtestProjectJson = Join-Path $_ "project.json"
+            $xtestProjectJson = Join-Path $_ project.json -Resolve
             $xproject = gc $xtestProjectJson -raw | ConvertFrom-Json
 
-            if ($xproject.dependencies.xunit) {
+            if ($xproject.testRunner) {
+                Trace-Log "Running tests in ""$_"""
 
                 # Check if netcoreapp1.0 exists in the project.json file
                 if ($xproject.frameworks.'netcoreapp1.0') {
                     # Run tests for Core CLR
-                    $opts = @()
-                    if ($VerbosePreference) {
-                        $opts += '-v'
-                    }
-                    $opts += 'test', '--configuration', $Configuration, '--framework', 'netcoreapp1.0'
-                    $opts += '-notrait', 'Platform=Linux', '-notrait', 'Platform=Darwin'
-                    if ($VerbosePreference) {
-                        $opts += '-verbose'
-                    }
-
-                    Trace-Log "$DotNetExe $opts"
-                    & $DotNetExe $opts
-
-                    if ($LASTEXITCODE -ne 0) {
-                        Error-Log "Tests failed @""$_"" on CoreCLR. Code: $LASTEXITCODE"
-                    }
+                    Test-XProjectCoreClr $_ $Configuration
                 }
 
                 # Run tests for CLR
                 if ($xproject.frameworks.net46) {
-                    # Build
-                    $opts = @()
-                    if ($VerbosePreference) {
-                        $opts += '-v'
-                    }
-                    $opts += 'build', '--configuration', $Configuration, '--runtime', 'win7-x64'
-
-                    Trace-Log "$DotNetExe $opts"
-                    & $DotNetExe $opts
-
-                    if ($LASTEXITCODE -ne 0) {
-                        Error-Log "Build failed @""$_"" on CLR. Code: $LASTEXITCODE"
-                    }
-                    else {
-                        $htmlOutput = Join-Path $_ "bin\$Configuration\net46\win7-x64\xunit.results.html"
-                        $desktopTestAssembly = Join-Path $_ "bin\$Configuration\net46\win7-x64\$directoryName.dll"
-                        $opts = $desktopTestAssembly, '-html', $htmlOutput
-                        $opts += '-notrait', 'Platform=Linux', '-notrait', 'Platform=Darwin'
-                        if ($VerbosePreference) {
-                            $opts += '-verbose'
-                        }
-                        Trace-Log "$XunitConsole $opts"
-
-                        & $XunitConsole $opts
-                        if (-not $?) {
-                            Error-Log "Tests failed @""$_"" on CLR. Code: $LASTEXITCODE"
-                        }
-                    }
+                    Test-XProjectClr $_ $Configuration
                 }
             }
             else {
                 Trace-Log "Skipping non-test project in ""$_"""
             }
-
-            popd
         }
     }
 }
@@ -547,8 +594,7 @@ Function Test-CoreProjects {
         [string]$Configuration = $DefaultConfiguration
     )
     $XProjectsLocation = Join-Path $NuGetClientRoot test\NuGet.Core.Tests
-
-    Test-CoreProjectsHelper -Configuration $Configuration -XProjectsLocation $XProjectsLocation
+    Test-CoreProjectsHelper $Configuration $XProjectsLocation
 }
 
 Function Test-FuncCoreProjects {
@@ -557,8 +603,7 @@ Function Test-FuncCoreProjects {
         [string]$Configuration = $DefaultConfiguration
     )
     $XProjectsLocation = Join-Path $NuGetClientRoot test\NuGet.Core.FuncTests
-
-    Test-CoreProjectsHelper -Configuration $Configuration -XProjectsLocation $XProjectsLocation
+    Test-CoreProjectsHelper $Configuration $XProjectsLocation
 }
 
 Function Test-CoreProjectsHelper {
@@ -567,8 +612,8 @@ Function Test-CoreProjectsHelper {
         [string]$Configuration,
         [string]$XProjectsLocation
     )
-
     $xtests = Find-XProjects $XProjectsLocation
+    $xtests | Restore-XProjects
     $xtests | Test-XProject -Configuration $Configuration
 }
 
@@ -580,8 +625,7 @@ Function Build-ClientsProjects {
         [int]$BuildNumber = (Get-BuildNumber),
         [ValidateSet(14,15)]
         [int]$ToolsetVersion = $DefaultMSBuildVersion,
-        [switch]$SkipRestore,
-        [switch]$Fast
+        [switch]$SkipRestore
     )
 
     $solutionPath = Join-Path $NuGetClientRoot NuGet.Clients.sln -Resolve
