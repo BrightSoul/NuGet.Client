@@ -19,7 +19,10 @@ namespace NuGet.ProjectManagement
 
             Logger = logger;
 
-            Cache = new Dictionary<string, IReadOnlyList<ExternalProjectReference>>(
+            DirectReferenceCache = new Dictionary<string, IReadOnlyList<ExternalProjectReference>>(
+                StringComparer.OrdinalIgnoreCase);
+
+            ClosureCache = new Dictionary<string, IReadOnlyList<ExternalProjectReference>>(
                 StringComparer.OrdinalIgnoreCase);
 
             SpecCache = new Dictionary<string, PackageSpec>(
@@ -27,10 +30,14 @@ namespace NuGet.ProjectManagement
         }
 
         /// <summary>
-        /// Cached references
+        /// A cache of a project's direct references. The key is the full path to the project.
         /// </summary>
-        /// <remarks>Projects should add themselves here after finding their references.</remarks>
-        public IDictionary<string, IReadOnlyList<ExternalProjectReference>> Cache { get; }
+        public IDictionary<string, IReadOnlyList<ExternalProjectReference>> DirectReferenceCache { get; }
+
+        /// <summary>
+        /// A cache of the full closure of project references. The key is the full path to the project.
+        /// </summary>
+        public IDictionary<string, IReadOnlyList<ExternalProjectReference>> ClosureCache { get; }
 
         /// <summary>
         /// Cached project.json files

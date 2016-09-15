@@ -12,29 +12,17 @@ namespace NuGet.PackageManagement
     public class BuildIntegratedProjectCacheEntry
     {
         public BuildIntegratedProjectCacheEntry(
-            string projectConfigPath,
             ISet<string> referenceClosure,
             DateTimeOffset? projectConfigLastModified)
         {
-            if (projectConfigPath == null)
-            {
-                throw new ArgumentNullException(nameof(projectConfigPath));
-            }
-
             if (referenceClosure == null)
             {
                 throw new ArgumentNullException(nameof(referenceClosure));
             }
-
-            ProjectConfigPath = projectConfigPath;
+            
             ReferenceClosure = referenceClosure;
             ProjectConfigLastModified = projectConfigLastModified;
         }
-
-        /// <summary>
-        /// The build integrated project for this entry.
-        /// </summary>
-        public string ProjectConfigPath { get; }
 
         /// <summary>
         /// All project.json files and msbuild references in the closure.

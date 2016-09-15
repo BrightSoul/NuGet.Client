@@ -188,6 +188,73 @@ namespace NuGet.Test
             Assert.Equal(3, closure.Count);
         }
 
+        [Fact]
+        public void BuildIntegratedRestoreUtility_GetDirectReferences_Basic()
+        {
+            // Arrange
+            var references = new HashSet<ExternalProjectReference>()
+            {
+                CreateReference("a", "b", "c"),
+                CreateReference("b"),
+                CreateReference("c", "d"),
+                CreateReference("d")
+            };
+
+            // Act
+            var actual = BuildIntegratedRestoreUtility
+                .GetDirectReferences("a", references)
+                .OrderBy(r => r.UniqueName)
+                .ToList();
+
+            // Assert
+            Assert.Equal(2, actual.Count);
+            Assert.Equal("b", actual[0].UniqueName);
+            Assert.Equal("c", actual[1].UniqueName);
+        }
+
+        [Fact]
+        public void BuildIntegratedRestoreUtility_GetDirectReferences_MissingReference()
+        {
+            // Arrange
+            var references = new HashSet<ExternalProjectReference>()
+            {
+                CreateReference("a", "b", "c"),
+                CreateReference("b"),
+                CreateReference("d")
+            };
+
+            // Act
+            var actual = BuildIntegratedRestoreUtility
+                .GetDirectReferences("a", references)
+                .OrderBy(r => r.UniqueName)
+                .ToList();
+
+            // Assert
+            Assert.Equal(1, actual.Count);
+            Assert.Equal("b", actual[0].UniqueName);
+        }
+
+        [Fact]
+        public void BuildIntegratedRestoreUtility_GetDirectReferences_MissingRoot()
+        {
+            // Arrange
+            var references = new HashSet<ExternalProjectReference>()
+            {
+                CreateReference("a", "b", "c"),
+                CreateReference("b"),
+                CreateReference("d")
+            };
+
+            // Act
+            var actual = BuildIntegratedRestoreUtility
+                .GetDirectReferences("e", references)
+                .OrderBy(r => r.UniqueName)
+                .ToList();
+
+            // Assert
+            Assert.Equal(0, actual.Count);
+        }
+
         private static ExternalProjectReference CreateReference(string name)
         {
             return new ExternalProjectReference(
@@ -958,10 +1025,10 @@ namespace NuGet.Test
 
                 var project1 = new TestBuildIntegratedNuGetProject(randomConfig, msBuildNuGetProjectSystem);
                 project1.ProjectClosure = new List<ExternalProjectReference>()
-            {
-                CreateReference("a", "a/project.json", new string[] { "b/project.json" }),
-                CreateReference("b", "b/project.json", new string[] { }),
-            };
+                {
+                    CreateReference("a", "a/project.json", new string[] { "b/project.json" }),
+                    CreateReference("b", "b/project.json", new string[] { }),
+                };
 
                 var msBuildNuGetProjectSystem2 = new TestMSBuildNuGetProjectSystem(
                     projectTargetFramework,
@@ -983,9 +1050,9 @@ namespace NuGet.Test
 
                 // Assert
                 Assert.Equal(2, cache.Count);
-                Assert.Equal(2, cache["project1"].ReferenceClosure.Count);
-                Assert.Equal(0, cache["project2"].ReferenceClosure.Count);
-                Assert.Equal("a|b", string.Join("|", cache["project1"].ReferenceClosure));
+                Assert.Equal(2, cache[project1.MSBuildProjectPath].ReferenceClosure.Count);
+                Assert.Equal(0, cache[project2.MSBuildProjectPath].ReferenceClosure.Count);
+                Assert.Equal("a|b", string.Join("|", cache[project1.MSBuildProjectPath].ReferenceClosure));
             }
         }
 
@@ -1405,8 +1472,14 @@ namespace NuGet.Test
         {
             public IReadOnlyList<ExternalProjectReference> ProjectClosure { get; set; }
 
-            public TestBuildIntegratedNuGetProject(string jsonConfig, IMSBuildNuGetProjectSystem msbuildProjectSystem)
-                : base(jsonConfig, $"{msbuildProjectSystem.ProjectFullPath}.{msbuildProjectSystem.ProjectName}.csproj", msbuildProjectSystem)
+            public TestBuildIntegratedNuGetProject(
+                string jsonConfig,
+                IMSBuildNuGetProjectSystem msbuildProjectSystem) : base(
+                    jsonConfig,
+                    Path.Combine(
+                        msbuildProjectSystem.ProjectFullPath,
+                        $"{msbuildProjectSystem.ProjectName}.csproj"),
+                    msbuildProjectSystem)
             {
                 InternalMetadata.Add(NuGetProjectMetadataKeys.UniqueName, msbuildProjectSystem.ProjectName);
             }

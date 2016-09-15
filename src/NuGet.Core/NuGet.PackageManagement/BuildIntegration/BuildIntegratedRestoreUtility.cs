@@ -162,22 +162,12 @@ namespace NuGet.PackageManagement
         }
 
         /// <summary>
-        /// Find all packages removed from <paramref name="updatedLockFile"/>.
-        /// </summary>
-        public static IReadOnlyList<PackageIdentity> GetRemovedPackages(
-            LockFile originalLockFile,
-            LockFile updatedLockFile)
-        {
-            return GetAddedPackages(updatedLockFile, originalLockFile);
-        }
-
-        /// <summary>
         /// Creates an index of the project unique name to the cache entry.
         /// The cache entry contains the project and the closure of project.json files.
         /// </summary>
         public static async Task<Dictionary<string, BuildIntegratedProjectCacheEntry>>
             CreateBuildIntegratedProjectStateCache(
-                IReadOnlyList<BuildIntegratedNuGetProject> projects,
+                IReadOnlyList<IDependencyGraphProject> projects,
                 ExternalProjectReferenceContext context)
         {
             var cache = new Dictionary<string, BuildIntegratedProjectCacheEntry>();
@@ -192,12 +182,7 @@ namespace NuGet.PackageManagement
 
                 // Store the last modified date of the project.json file
                 // If there are any changes a restore is needed
-                var lastModified = DateTimeOffset.MinValue;
-
-                if (File.Exists(project.JsonConfigPath))
-                {
-                    lastModified = File.GetLastWriteTimeUtc(project.JsonConfigPath);
-                }
+                var lastModified = project.LastModified;
 
                 foreach (var reference in closure)
                 {
@@ -212,21 +197,12 @@ namespace NuGet.PackageManagement
                     }
                 }
 
-                var projectInfo = new BuildIntegratedProjectCacheEntry(
-                    project.JsonConfigPath,
-                    files,
-                    lastModified);
+                var projectInfo = new BuildIntegratedProjectCacheEntry(files, lastModified);
+                var projectPath = project.MSBuildProjectPath;
 
-                var uniqueName = string.Empty;
-
-                if (!project.TryGetMetadata(NuGetProjectMetadataKeys.UniqueName, out uniqueName))
+                if (!cache.ContainsKey(projectPath))
                 {
-                    uniqueName = project.GetMetadata<string>(NuGetProjectMetadataKeys.Name);
-                }
-
-                if (!cache.ContainsKey(uniqueName))
-                {
-                    cache.Add(uniqueName, projectInfo);
+                    cache.Add(projectPath, projectInfo);
                 }
                 else
                 {
@@ -279,79 +255,14 @@ namespace NuGet.PackageManagement
         /// </summary>
         /// <remarks>Floating versions and project.json files with supports require a full restore.</remarks>
         public static bool IsRestoreRequired(
-            IReadOnlyList<BuildIntegratedNuGetProject> projects,
+            IReadOnlyList<IDependencyGraphProject> projects,
             IReadOnlyList<string> packageFolderPaths,
-            ExternalProjectReferenceContext referenceContext)
+            ExternalProjectReferenceContext context)
         {
             var packagesChecked = new HashSet<PackageIdentity>();
             var pathResolvers = packageFolderPaths.Select(path => new VersionFolderPathResolver(path));
 
-            // Validate project.lock.json files
-            foreach (var project in projects)
-            {
-                var lockFilePath = ProjectJsonPathUtilities.GetLockFilePath(project.JsonConfigPath);
-
-                if (!File.Exists(lockFilePath))
-                {
-                    // If the lock file does not exist a restore is needed
-                    return true;
-                }
-
-                var lockFileFormat = new LockFileFormat();
-                var lockFile = lockFileFormat.Read(lockFilePath, referenceContext.Logger);
-
-                var packageSpec = referenceContext.GetOrCreateSpec(project.ProjectName, project.JsonConfigPath);
-
-                if (!lockFile.IsValidForPackageSpec(packageSpec, LockFileFormat.Version))
-                {
-                    // The project.json file has been changed and the lock file needs to be updated.
-                    return true;
-                }
-
-                // Verify all libraries are on disk
-                var packages = lockFile.Libraries.Where(library => library.Type == LibraryType.Package);
-
-                foreach (var library in packages)
-                {
-                    var identity = new PackageIdentity(library.Name, library.Version);
-
-                    // Each id/version only needs to be checked once
-                    if (packagesChecked.Add(identity))
-                    {
-                        var found = false;
-
-                        //  Check each package folder. These need to match the order used for restore.
-                        foreach (var resolver in pathResolvers)
-                        {
-                            // Verify the SHA for each package
-                            var hashPath = resolver.GetHashPath(library.Name, library.Version);
-
-                            if (File.Exists(hashPath))
-                            {
-                                found = true;
-                                var sha512 = File.ReadAllText(hashPath);
-
-                                if (library.Sha512 != sha512)
-                                {
-                                    // A package has changed
-                                    return true;
-                                }
-
-                                // Skip checking the rest of the package folders
-                                break;
-                            }
-                        }
-
-                        if (!found)
-                        {
-                            // A package is missing
-                            return true;
-                        }
-                    }
-                }
-            }
-
-            return false;
+            return projects.Any(p => p.IsRestoreRequired(pathResolvers, packagesChecked, context));
         }
 
         /// <summary>
@@ -386,16 +297,9 @@ namespace NuGet.PackageManagement
                 // do not count the target as a parent
                 if (!target.Equals(project))
                 {
-                    var uniqueName = string.Empty;
-
-                    if (!project.TryGetMetadata(NuGetProjectMetadataKeys.UniqueName, out uniqueName))
-                    {
-                        uniqueName = project.GetMetadata<string>(NuGetProjectMetadataKeys.Name);
-                    }
-
                     BuildIntegratedProjectCacheEntry cacheEntry;
 
-                    if (cache.TryGetValue(uniqueName, out cacheEntry))
+                    if (cache.TryGetValue(project.MSBuildProjectPath, out cacheEntry))
                     {
                         // find all projects which have a child reference matching the same project.json path as the target
                         if (cacheEntry.ReferenceClosure.Any(reference =>
@@ -409,6 +313,37 @@ namespace NuGet.PackageManagement
 
             // sort parents by name to make this more deterministic during restores
             return parents.OrderBy(parent => parent.ProjectName, StringComparer.Ordinal).ToList();
+        }
+
+        /// <summary>
+        /// Find direct project references from a larger set of references.
+        /// </summary>
+        public static ISet<ExternalProjectReference> GetDirectReferences(
+            string rootUniqueName,
+            ISet<ExternalProjectReference> references)
+        {
+            var directReferences = new HashSet<ExternalProjectReference>();
+
+            var root = references
+                .FirstOrDefault(p => rootUniqueName.Equals(p.UniqueName, StringComparison.Ordinal));
+
+            if (root == null)
+            {
+                return directReferences;
+            }
+
+            foreach (var uniqueName in root.ExternalProjectReferences)
+            {
+                var directReference = references
+                    .FirstOrDefault(p => uniqueName.Equals(p.UniqueName, StringComparison.Ordinal));
+
+                if (directReference != null)
+                {
+                    directReferences.Add(directReference);
+                }
+            }
+
+            return directReferences;
         }
 
         /// <summary>
@@ -488,15 +423,8 @@ namespace NuGet.PackageManagement
 
             if (!orderedChilds.Contains(target))
             {
-                var uniqueName = string.Empty;
-
-                if (!target.TryGetMetadata(NuGetProjectMetadataKeys.UniqueName, out uniqueName))
-                {
-                    uniqueName = target.GetMetadata<string>(NuGetProjectMetadataKeys.Name);
-                }
-
                 BuildIntegratedProjectCacheEntry cacheEntry;
-                if (cache.TryGetValue(uniqueName, out cacheEntry))
+                if (cache.TryGetValue(target.MSBuildProjectPath, out cacheEntry))
                 {
                     foreach (var reference in cacheEntry.ReferenceClosure)
                     {
