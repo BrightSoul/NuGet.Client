@@ -24,7 +24,7 @@
       <EmbedInteropTypes>False</EmbedInteropTypes>
     </Reference>
     <Reference Include="Microsoft.VisualStudio.ComponentModelHost">
-      <HintPath>$(VisualStudioInstallDir)PublicAssemblies\Microsoft.VisualStudio.ComponentModelHost.dll</HintPath>
+      <HintPath>$(DevEnvDir)PublicAssemblies\Microsoft.VisualStudio.ComponentModelHost.dll</HintPath>
     </Reference>
   </ItemGroup>
   <Choose>

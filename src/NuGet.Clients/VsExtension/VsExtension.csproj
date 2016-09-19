@@ -33,7 +33,7 @@
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'Debug'">
     <StartAction>Program</StartAction>
-    <StartProgram>$(VisualStudioInstallDir)\Common7\IDE\devenv.exe</StartProgram>
+    <StartProgram>$(DevEnvDir)\Common7\IDE\devenv.exe</StartProgram>
     <StartArguments>/rootsuffix Exp /log</StartArguments>
     <CreateVsixContainer>True</CreateVsixContainer>
     <DeployExtension>True</DeployExtension>
@@ -235,7 +235,7 @@
     </Reference>
     <Reference Include="Microsoft.VisualStudio.ComponentModelHost">
       <Private>False</Private>
-      <HintPath>$(VisualStudioInstallDir)PublicAssemblies\Microsoft.VisualStudio.ComponentModelHost.dll</HintPath>
+      <HintPath>$(DevEnvDir)PublicAssemblies\Microsoft.VisualStudio.ComponentModelHost.dll</HintPath>
     </Reference>
     <Reference Include="Microsoft.VisualStudio.Shell.Interop.14.0.DesignTime, Version=14.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
       <EmbedInteropTypes>True</EmbedInteropTypes>
