@@ -104,7 +104,7 @@
     <Compile Include="IDE\NuGetAndEnvDTEProjectCache.cs" />
     <Compile Include="IDE\EnvDTEProjectName.cs" />
     <Compile Include="IDE\IScriptExecutor.cs" />
-    <Compile Include="IDE\VsProjectReferenceUtility.cs" />
+    <Compile Include="IDE\VSProjectReferenceUtility.cs" />
     <Compile Include="ProjectSystems\VSMSBuildNuGetProject.cs" />
     <Compile Include="ProjectSystems\MSBuildShellOutNuGetProject.cs" />
     <Compile Include="Telemetry\ProjectTelemetryEvent.cs" />

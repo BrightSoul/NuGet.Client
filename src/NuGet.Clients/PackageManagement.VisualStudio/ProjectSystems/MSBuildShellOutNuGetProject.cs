@@ -389,7 +389,7 @@ namespace NuGet.PackageManagement.VisualStudio
                 externalProjectReferences.Add(reference);
             }
 
-            return BuildIntegratedRestoreUtility
+            return DependencyGraphProjectCacheUtility
                 .GetExternalClosure(_fullProjectPath, externalProjectReferences)
                 .ToList();
         }

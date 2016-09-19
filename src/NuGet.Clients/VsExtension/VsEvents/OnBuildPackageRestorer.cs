@@ -37,8 +37,8 @@ namespace NuGetVSExtension
 
         private readonly DTE _dte;
 
-        private Dictionary<string, BuildIntegratedProjectCacheEntry> _buildIntegratedCache
-            = new Dictionary<string, BuildIntegratedProjectCacheEntry>(StringComparer.Ordinal);
+        private Dictionary<string, DependencyGraphProjectCacheEntry> _dependencyGraphProjectCache
+            = new Dictionary<string, DependencyGraphProjectCacheEntry>(StringComparer.Ordinal);
 
         // The value of the "MSBuild project build output verbosity" setting 
         // of VS. From 0 (quiet) to 4 (Diagnostic).
@@ -163,9 +163,9 @@ namespace NuGetVSExtension
                 if (Action == vsBuildAction.vsBuildActionClean)
                 {
                     // Clear the project.json restore cache on clean to ensure that the next build restores again
-                    if (_buildIntegratedCache != null)
+                    if (_dependencyGraphProjectCache != null)
                     {
-                        _buildIntegratedCache.Clear();
+                        _dependencyGraphProjectCache.Clear();
                     }
 
                     return;
@@ -363,7 +363,7 @@ namespace NuGetVSExtension
                             if (packageSpec.RestoreMetadata.OutputType == RestoreOutputType.NETCore ||
                                 packageSpec.RestoreMetadata.OutputType == RestoreOutputType.UAP)
                             {
-                                dgSpec.AddRestore(project.MSBuildProjectPath);
+                                dgSpec.AddRestore(packageSpec.RestoreMetadata.ProjectUniqueName);
                             }
                         }
 
@@ -412,9 +412,9 @@ namespace NuGetVSExtension
             try
             {
                 // Swap caches 
-                var oldCache = _buildIntegratedCache;
-                _buildIntegratedCache
-                    = await BuildIntegratedRestoreUtility.CreateBuildIntegratedProjectStateCache(
+                var oldCache = _dependencyGraphProjectCache;
+                _dependencyGraphProjectCache
+                    = await DependencyGraphProjectCacheUtility.CreateDependencyGraphProjectCache(
                         projects,
                         referenceContext);
 
@@ -424,7 +424,7 @@ namespace NuGetVSExtension
                     return true;
                 }
 
-                if (BuildIntegratedRestoreUtility.CacheHasChanges(oldCache, _buildIntegratedCache))
+                if (DependencyGraphProjectCacheUtility.CacheHasChanges(oldCache, _dependencyGraphProjectCache))
                 {
                     // A new project has been added
                     return true;
@@ -439,7 +439,7 @@ namespace NuGetVSExtension
                 packageFolderPaths.AddRange(nugetPaths.FallbackPackageFolders);
 
                 // Verify all packages exist and have the expected hashes
-                var restoreRequired = BuildIntegratedRestoreUtility.IsRestoreRequired(
+                var restoreRequired = DependencyGraphProjectCacheUtility.IsRestoreRequired(
                     projects,
                     packageFolderPaths,
                     referenceContext);

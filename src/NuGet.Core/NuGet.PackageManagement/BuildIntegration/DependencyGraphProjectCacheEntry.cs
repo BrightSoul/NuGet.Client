@@ -9,9 +9,9 @@ namespace NuGet.PackageManagement
     /// <summary>
     /// Represents the state of a build integrated project.
     /// </summary>
-    public class BuildIntegratedProjectCacheEntry
+    public class DependencyGraphProjectCacheEntry
     {
-        public BuildIntegratedProjectCacheEntry(
+        public DependencyGraphProjectCacheEntry(
             ISet<string> referenceClosure,
             DateTimeOffset? projectConfigLastModified)
         {

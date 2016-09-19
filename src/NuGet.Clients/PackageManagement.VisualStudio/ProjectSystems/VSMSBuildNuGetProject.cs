@@ -28,7 +28,7 @@ namespace NuGet.PackageManagement.VisualStudio
         public override async Task<IReadOnlyList<ExternalProjectReference>> GetProjectReferenceClosureAsync(
             ExternalProjectReferenceContext context)
         {
-            return await VsProjectReferenceUtility.GetProjectReferenceClosureAsync(_project, context);
+            return await VSProjectReferenceUtility.GetProjectReferenceClosureAsync(_project, context);
         }
     }
 }

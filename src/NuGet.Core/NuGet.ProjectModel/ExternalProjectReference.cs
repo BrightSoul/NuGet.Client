@@ -104,7 +104,7 @@ namespace NuGet.ProjectModel
             }
 
             UniqueName = uniqueName;
-            PackageSpecPath = packageSpecPath;
+            ProjectJsonPath = packageSpecPath;
             MSBuildProjectPath = msbuildProjectPath;
             PackageSpecProjectName = packageSpecProjectName;
             ExternalProjectReferences = projectReferences.ToList();
@@ -128,9 +128,9 @@ namespace NuGet.ProjectModel
         {
             get
             {
-                if (_packageSpec == null && PackageSpecPath != null && PackageSpecProjectName != null)
+                if (_packageSpec == null && ProjectJsonPath != null && PackageSpecProjectName != null)
                 {
-                    _packageSpec = JsonPackageSpecReader.GetPackageSpec(PackageSpecProjectName, PackageSpecPath);
+                    _packageSpec = JsonPackageSpecReader.GetPackageSpec(PackageSpecProjectName, ProjectJsonPath);
                 }
 
                 return _packageSpec;
@@ -151,7 +151,7 @@ namespace NuGet.ProjectModel
         /// Path to project.json
         /// </summary>
         /// <remarks>This may be null for projects that do not contain project.json.</remarks>
-        public string PackageSpecPath { get; }
+        public string ProjectJsonPath { get; }
 
         /// <summary>
         /// Project name used for project.json

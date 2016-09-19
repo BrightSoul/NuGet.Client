@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using EnvDTE;
 using NuGet.Packaging;
 using NuGet.Packaging.Core;
 using NuGet.ProjectManagement;
@@ -19,6 +20,7 @@ namespace NuGet.PackageManagement.VisualStudio
     /// </summary>
     public class BuildIntegratedProjectSystem : BuildIntegratedNuGetProject
     {
+        private readonly EnvDTEProject _envDTEProject;
         private IScriptExecutor _scriptExecutor;
 
         public BuildIntegratedProjectSystem(
@@ -29,15 +31,10 @@ namespace NuGet.PackageManagement.VisualStudio
             string uniqueName)
             : base(jsonConfigPath, msbuildProjectFilePath, msbuildProjectSystem)
         {
+            _envDTEProject = envDTEProject;
+
             InternalMetadata.Add(NuGetProjectMetadataKeys.UniqueName, uniqueName);
-
-            EnvDTEProject = envDTEProject;
         }
-
-        /// <summary>
-        /// DTE project
-        /// </summary>
-        protected EnvDTEProject EnvDTEProject { get; }
 
         private IScriptExecutor ScriptExecutor
         {
@@ -47,6 +44,7 @@ namespace NuGet.PackageManagement.VisualStudio
                 {
                     _scriptExecutor = ServiceLocator.GetInstanceSafe<IScriptExecutor>();
                 }
+
                 return _scriptExecutor;
             }
         }
@@ -81,15 +79,14 @@ namespace NuGet.PackageManagement.VisualStudio
 
                         if (!string.IsNullOrEmpty(initPS1RelativePath))
                         {
-                            initPS1RelativePath =
-                                ProjectManagement.PathUtility
+                            initPS1RelativePath = PathUtility
                                 .ReplaceAltDirSeparatorWithDirSeparator(initPS1RelativePath);
 
                             return await ScriptExecutor.ExecuteAsync(
                                 identity,
                                 packageInstallPath,
                                 initPS1RelativePath,
-                                EnvDTEProject,
+                                _envDTEProject,
                                 this,
                                 projectContext,
                                 throwOnFailure);
@@ -104,7 +101,7 @@ namespace NuGet.PackageManagement.VisualStudio
         public override async Task<IReadOnlyList<ExternalProjectReference>> GetProjectReferenceClosureAsync(
             ExternalProjectReferenceContext context)
         {
-            return await VsProjectReferenceUtility.GetProjectReferenceClosureAsync(EnvDTEProject, context);
+            return await VSProjectReferenceUtility.GetProjectReferenceClosureAsync(_envDTEProject, context);
         }
     }
 }

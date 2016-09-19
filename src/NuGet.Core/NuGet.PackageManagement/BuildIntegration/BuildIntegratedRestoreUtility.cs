@@ -3,7 +3,6 @@
 
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -162,116 +161,12 @@ namespace NuGet.PackageManagement
         }
 
         /// <summary>
-        /// Creates an index of the project unique name to the cache entry.
-        /// The cache entry contains the project and the closure of project.json files.
-        /// </summary>
-        public static async Task<Dictionary<string, BuildIntegratedProjectCacheEntry>>
-            CreateBuildIntegratedProjectStateCache(
-                IReadOnlyList<IDependencyGraphProject> projects,
-                ExternalProjectReferenceContext context)
-        {
-            var cache = new Dictionary<string, BuildIntegratedProjectCacheEntry>();
-
-            // Find all project closures
-            foreach (var project in projects)
-            {
-                // Get all project.json file paths in the closure
-                var closure = await project.GetProjectReferenceClosureAsync(context);
-
-                var files = new HashSet<string>(StringComparer.Ordinal);
-
-                // Store the last modified date of the project.json file
-                // If there are any changes a restore is needed
-                var lastModified = project.LastModified;
-
-                foreach (var reference in closure)
-                {
-                    if (!string.IsNullOrEmpty(reference.MSBuildProjectPath))
-                    {
-                        files.Add(reference.MSBuildProjectPath);
-                    }
-
-                    if (reference.PackageSpecPath != null)
-                    {
-                        files.Add(reference.PackageSpecPath);
-                    }
-                }
-
-                var projectInfo = new BuildIntegratedProjectCacheEntry(files, lastModified);
-                var projectPath = project.MSBuildProjectPath;
-
-                if (!cache.ContainsKey(projectPath))
-                {
-                    cache.Add(projectPath, projectInfo);
-                }
-                else
-                {
-                    Debug.Fail("project list contains duplicate projects");
-                }
-            }
-
-            return cache;
-        }
-
-        /// <summary>
-        /// Verifies that the caches contain the same projects and that each project contains the same closure.
-        /// This is used to detect if any projects have changed before verifying the lock files.
-        /// </summary>
-        public static bool CacheHasChanges(
-            IReadOnlyDictionary<string, BuildIntegratedProjectCacheEntry> previousCache,
-            IReadOnlyDictionary<string, BuildIntegratedProjectCacheEntry> currentCache)
-        {
-            foreach (var item in currentCache)
-            {
-                var projectName = item.Key;
-                BuildIntegratedProjectCacheEntry projectInfo;
-                if (!previousCache.TryGetValue(projectName, out projectInfo))
-                {
-                    // A new project was added, this needs a restore
-                    return true;
-                }
-
-                if (item.Value.ProjectConfigLastModified?.Equals(projectInfo.ProjectConfigLastModified) != true)
-                {
-                    // project.json has been modified
-                    return true;
-                }
-
-                if (!item.Value.ReferenceClosure.SetEquals(projectInfo.ReferenceClosure))
-                {
-                    // The project closure has changed
-                    return true;
-                }
-            }
-
-            // no project changes have occurred
-            return false;
-        }
-
-        /// <summary>
-        /// Validate that all project.lock.json files are validate for the project.json files,
-        /// and that no packages are missing.
-        /// If a full restore is required this will return false.
-        /// </summary>
-        /// <remarks>Floating versions and project.json files with supports require a full restore.</remarks>
-        public static bool IsRestoreRequired(
-            IReadOnlyList<IDependencyGraphProject> projects,
-            IReadOnlyList<string> packageFolderPaths,
-            ExternalProjectReferenceContext context)
-        {
-            var packagesChecked = new HashSet<PackageIdentity>();
-            var pathResolvers = packageFolderPaths.Select(path => new VersionFolderPathResolver(path));
-
-            return projects.Any(p => p.IsRestoreRequired(pathResolvers, packagesChecked, context));
-        }
-
-        /// <summary>
         /// Find the list of parent projects which directly or indirectly reference the child project.
         /// </summary>
         public static IReadOnlyList<BuildIntegratedNuGetProject> GetParentProjectsInClosure(
             IReadOnlyList<BuildIntegratedNuGetProject> projects,
             BuildIntegratedNuGetProject target,
-            IReadOnlyDictionary<string, BuildIntegratedProjectCacheEntry> cache)
+            IReadOnlyDictionary<string, DependencyGraphProjectCacheEntry> cache)
         {
             if (projects == null)
             {
@@ -297,7 +192,7 @@ namespace NuGet.PackageManagement
                 // do not count the target as a parent
                 if (!target.Equals(project))
                 {
-                    BuildIntegratedProjectCacheEntry cacheEntry;
+                    DependencyGraphProjectCacheEntry cacheEntry;
 
                     if (cache.TryGetValue(project.MSBuildProjectPath, out cacheEntry))
                     {
@@ -311,93 +206,22 @@ namespace NuGet.PackageManagement
                 }
             }
 
-            // sort parents by name to make this more deterministic during restores
-            return parents.OrderBy(parent => parent.ProjectName, StringComparer.Ordinal).ToList();
-        }
-
-        /// <summary>
-        /// Find direct project references from a larger set of references.
-        /// </summary>
-        public static ISet<ExternalProjectReference> GetDirectReferences(
-            string rootUniqueName,
-            ISet<ExternalProjectReference> references)
-        {
-            var directReferences = new HashSet<ExternalProjectReference>();
-
-            var root = references
-                .FirstOrDefault(p => rootUniqueName.Equals(p.UniqueName, StringComparison.Ordinal));
-
-            if (root == null)
-            {
-                return directReferences;
-            }
-
-            foreach (var uniqueName in root.ExternalProjectReferences)
-            {
-                var directReference = references
-                    .FirstOrDefault(p => uniqueName.Equals(p.UniqueName, StringComparison.Ordinal));
-
-                if (directReference != null)
-                {
-                    directReferences.Add(directReference);
-                }
-            }
-
-            return directReferences;
-        }
-
-        /// <summary>
-        /// Find the project closure from a larger set of references.
-        /// </summary>
-        public static ISet<ExternalProjectReference> GetExternalClosure(
-            string rootUniqueName,
-            ISet<ExternalProjectReference> references)
-        {
-            var closure = new HashSet<ExternalProjectReference>();
-
-            // Start with the parent node
-            var parent = references.FirstOrDefault(project =>
-                    rootUniqueName.Equals(project.UniqueName, StringComparison.Ordinal));
-
-            if (parent != null)
-            {
-                closure.Add(parent);
-            }
-
-            // Loop adding child projects each time
-            var notDone = true;
-            while (notDone)
-            {
-                notDone = false;
-
-                foreach (var childName in closure
-                    .Where(project => project.ExternalProjectReferences != null)
-                    .SelectMany(project => project.ExternalProjectReferences)
-                    .ToArray())
-                {
-                    var child = references.FirstOrDefault(project =>
-                        childName.Equals(project.UniqueName, StringComparison.Ordinal));
-
-                    // Continue until nothing new is added
-                    if (child != null)
-                    {
-                        notDone |= closure.Add(child);
-                    }
-                }
-            }
-
-            return closure;
+            // sort parents by path to make this more deterministic during restores
+            return parents
+                .OrderBy(parent => parent.MSBuildProjectPath, StringComparer.Ordinal)
+                .ToList();
         }
 
         /// <summary>
         /// Find the list of child projects direct or indirect references of target project in
         /// reverse dependency order like the least dependent package first.
         /// </summary>
-        public static void GetChildProjectsInClosure(BuildIntegratedNuGetProject target,
+        public static void GetChildProjectsInClosure(
+            BuildIntegratedNuGetProject target,
             IReadOnlyList<BuildIntegratedNuGetProject> projects,
-            IList<BuildIntegratedNuGetProject> orderedChilds,
-            HashSet<string> uniqueProjectNames,
-            IReadOnlyDictionary<string, BuildIntegratedProjectCacheEntry> cache)
+            IList<BuildIntegratedNuGetProject> orderedChildren,
+            HashSet<string> msbuildProjectPaths,
+            IReadOnlyDictionary<string, DependencyGraphProjectCacheEntry> cache)
         {
             if (projects == null)
             {
@@ -409,21 +233,21 @@ namespace NuGet.PackageManagement
                 throw new ArgumentNullException(nameof(target));
             }
 
-            if (orderedChilds == null)
+            if (orderedChildren == null)
             {
-                orderedChilds = new List<BuildIntegratedNuGetProject>();
+                orderedChildren = new List<BuildIntegratedNuGetProject>();
             }
 
-            if (uniqueProjectNames == null)
+            if (msbuildProjectPaths == null)
             {
-                uniqueProjectNames = new HashSet<string>();
+                msbuildProjectPaths = new HashSet<string>();
             }
 
-            uniqueProjectNames.Add(target.ProjectName);
+            msbuildProjectPaths.Add(target.MSBuildProjectPath);
 
-            if (!orderedChilds.Contains(target))
+            if (!orderedChildren.Contains(target))
             {
-                BuildIntegratedProjectCacheEntry cacheEntry;
+                DependencyGraphProjectCacheEntry cacheEntry;
                 if (cache.TryGetValue(target.MSBuildProjectPath, out cacheEntry))
                 {
                     foreach (var reference in cacheEntry.ReferenceClosure)
@@ -434,13 +258,13 @@ namespace NuGet.PackageManagement
                                 StringComparer.OrdinalIgnoreCase.Equals(Path.GetFullPath(proj.JsonConfigPath),
                                     packageSpecPath));
 
-                        if (depProject != null && !orderedChilds.Contains(depProject) && uniqueProjectNames.Add(depProject.ProjectName))
+                        if (depProject != null && !orderedChildren.Contains(depProject) && msbuildProjectPaths.Add(depProject.MSBuildProjectPath))
                         {
-                            GetChildProjectsInClosure(depProject, projects, orderedChilds, uniqueProjectNames, cache);
+                            GetChildProjectsInClosure(depProject, projects, orderedChildren, msbuildProjectPaths, cache);
                         }
                     }
                 }
-                orderedChilds.Add(target);
+                orderedChildren.Add(target);
             }
         }
     }

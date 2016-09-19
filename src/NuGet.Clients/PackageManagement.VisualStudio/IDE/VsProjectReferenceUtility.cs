@@ -21,10 +21,12 @@ using EnvDTEProject = EnvDTE.Project;
 
 namespace NuGet.PackageManagement.VisualStudio
 {
-    public static class VsProjectReferenceUtility
+    public static class VSProjectReferenceUtility
     {
         /// <summary>
-        /// Returns the closure of all project to project references below this project.
+        /// Returns the closure of all project to project references below this project. While calculating the closure,
+        /// this method populates the <see cref="ExternalProjectReferenceContext.ClosureCache"/> and the
+        /// <see cref="ExternalProjectReferenceContext.DirectReferenceCache"/>.
         /// </summary>
         /// <remarks>This uses DTE and should be called from the UI thread.</remarks>
         public static async Task<IReadOnlyList<ExternalProjectReference>> GetProjectReferenceClosureAsync(
@@ -54,17 +56,17 @@ namespace NuGet.PackageManagement.VisualStudio
                 var dteReference = toProcess.Pop();
 
                 // Find the path of the current project
-                var projectFileFullPath = dteReference.Path;
+                var projectPath = dteReference.Path;
                 var project = dteReference.Project;
 
-                if (string.IsNullOrEmpty(projectFileFullPath) || !uniqueNames.Add(projectFileFullPath))
+                if (string.IsNullOrEmpty(projectPath) || !uniqueNames.Add(projectPath))
                 {
                     // This has already been processed or does not exist
                     continue;
                 }
 
                 IReadOnlyList<ExternalProjectReference> cacheReferences;
-                if (context.ClosureCache.TryGetValue(projectFileFullPath, out cacheReferences))
+                if (context.ClosureCache.TryGetValue(projectPath, out cacheReferences))
                 {
                     // The cached value contains the entire closure, add it to the results and skip
                     // all child references.
@@ -75,10 +77,10 @@ namespace NuGet.PackageManagement.VisualStudio
                     // Get direct references
                     var projectResult = GetDirectProjectReferences(
                         dteReference.Project,
-                        projectFileFullPath,
-                        context,
+                        projectPath,
                         itemsFactory,
-                        rootProjectPath);
+                        rootProjectPath,
+                        context.Logger);
 
                     // Add results to the closure
                     results.UnionWith(projectResult.Processed);
@@ -96,8 +98,8 @@ namespace NuGet.PackageManagement.VisualStudio
             {
                 if (!context.ClosureCache.ContainsKey(project.MSBuildProjectPath))
                 {
-                    var closure = BuildIntegratedRestoreUtility.GetExternalClosure(project.UniqueName, results);
-                    var direct = BuildIntegratedRestoreUtility.GetDirectReferences(project.UniqueName, closure);
+                    var closure = DependencyGraphProjectCacheUtility.GetExternalClosure(project.UniqueName, results);
+                    var direct = DependencyGraphProjectCacheUtility.GetDirectReferences(project.UniqueName, closure);
 
                     context.ClosureCache.Add(project.MSBuildProjectPath, closure.ToList());
                     context.DirectReferenceCache.Add(project.MSBuildProjectPath, direct.ToList());
@@ -112,33 +114,33 @@ namespace NuGet.PackageManagement.VisualStudio
         /// </summary>
         private static DirectReferences GetDirectProjectReferences(
             EnvDTEProject project,
-            string projectFileFullPath,
-            ExternalProjectReferenceContext context,
+            string projectPath,
             IVsEnumHierarchyItemsFactory itemsFactory,
-            string rootProjectPath)
+            string rootProjectPath,
+            ILogger log)
         {
             var result = new DirectReferences();
 
             // Find a project.json in the project
             // This checks for files on disk to match how BuildIntegratedProjectSystem checks at creation time.
             // NuGet.exe also uses disk paths and not the project file.
-            var projectName = Path.GetFileNameWithoutExtension(projectFileFullPath);
+            var projectName = Path.GetFileNameWithoutExtension(projectPath);
 
-            var projectDirectory = Path.GetDirectoryName(projectFileFullPath);
+            var projectDirectory = Path.GetDirectoryName(projectPath);
 
             // Check for projectName.project.json and project.json
-            string jsonConfigItem =
-                ProjectJsonPathUtilities.GetProjectConfigPath(
-                    directoryPath: projectDirectory,
-                    projectName: projectName);
-
-            var hasProjectJson = true;
+            var projectJsonPath = ProjectJsonPathUtilities.GetProjectConfigPath(projectDirectory, projectName);
 
             // Verify the file exists, otherwise clear it
-            if (!File.Exists(jsonConfigItem))
+            bool hasProjectJson;
+            if (!File.Exists(projectJsonPath))
             {
-                jsonConfigItem = null;
+                projectJsonPath = null;
                 hasProjectJson = false;
+            }
+            else
+            {
+                hasProjectJson = true;
             }
 
             // Verify ReferenceOutputAssembly
@@ -217,7 +219,7 @@ namespace NuGet.PackageManagement.VisualStudio
                     // ignore them and show a warning
                     hasMissingReferences = true;
 
-                    context.Logger.LogDebug(ex.ToString());
+                    log.LogDebug(ex.ToString());
 
                     Debug.Fail("Unable to find project closure: " + ex.ToString());
                 }
@@ -235,18 +237,18 @@ namespace NuGet.PackageManagement.VisualStudio
                     projectName,
                     rootProjectPath);
 
-                context.Logger.LogWarning(warning);
+                log.LogWarning(warning);
             }
 
             // For the xproj -> xproj -> csproj scenario find all xproj-> xproj references.
-            if (projectFileFullPath.EndsWith(XProjUtility.XProjExtension, StringComparison.OrdinalIgnoreCase))
+            if (projectPath.EndsWith(XProjUtility.XProjExtension, StringComparison.OrdinalIgnoreCase))
             {
                 // All xproj paths, these are already checked for project.json
-                var xprojFiles = XProjUtility.GetProjectReferences(projectFileFullPath);
+                var xprojFiles = XProjUtility.GetProjectReferences(projectPath);
 
                 if (xprojFiles.Count > 0)
                 {
-                    var pathToProject = GetPathToDTEProjectLookup(project);
+                    var pathToProject = GetPathToDTEProjectLookup(project.DTE.Solution);
 
                     foreach (var xProjPath in xprojFiles)
                     {
@@ -271,25 +273,24 @@ namespace NuGet.PackageManagement.VisualStudio
             }
 
             // Only set a package spec project name if a package spec exists
-            var packageSpecProjectName = jsonConfigItem == null ? null : projectName;
+            var packageSpecProjectName = projectJsonPath == null ? null : projectName;
 
             // Add the parent project to the results
             result.Processed.Add(new ExternalProjectReference(
-                projectFileFullPath,
+                projectPath,
                 packageSpecProjectName,
-                jsonConfigItem,
-                projectFileFullPath,
+                projectJsonPath,
+                projectPath,
                 childReferences));
 
             return result;
         }
 
-        private static Dictionary<string, EnvDTEProject> GetPathToDTEProjectLookup(EnvDTEProject project)
+        private static Dictionary<string, EnvDTEProject> GetPathToDTEProjectLookup(Solution solution)
         {
-            var pathToProject
-                   = new Dictionary<string, EnvDTEProject>(StringComparer.OrdinalIgnoreCase);
+            var pathToProject = new Dictionary<string, EnvDTEProject>(StringComparer.OrdinalIgnoreCase);
 
-            foreach (var solutionProjectObj in project.DTE.Solution.Projects)
+            foreach (var solutionProjectObj in solution.Projects)
             {
                 var solutionProject = solutionProjectObj as EnvDTEProject;
 
