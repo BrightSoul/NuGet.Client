@@ -302,7 +302,7 @@ namespace NuGet.ProjectManagement.Projects
                         new LibraryDependency
                         {
                             LibraryRange = new LibraryRange(
-                                reference.ProjectName,
+                                reference.UniqueName,
                                 LibraryDependencyTarget.ExternalProject)
                         });
                 }
