@@ -120,7 +120,7 @@ namespace NuGet.PackageManagement.VisualStudio
                     // Project folder path is the packages config folder path
                     var packagesConfigFolderPath = EnvDTEProjectUtility.GetFullPath(envDTEProject);
 
-                    result = new MSBuildNuGetProjectSystem(
+                    result = new VSMSBuildNuGetProject(
                         envDTEProject,
                         msBuildNuGetProjectSystem,
                         folderNuGetProjectFullPath,

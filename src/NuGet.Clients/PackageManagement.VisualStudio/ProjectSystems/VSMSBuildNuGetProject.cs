@@ -9,11 +9,11 @@ using EnvDTEProject = EnvDTE.Project;
 
 namespace NuGet.PackageManagement.VisualStudio
 {
-    public class MSBuildNuGetProjectSystem : MSBuildNuGetProject
+    public class VSMSBuildNuGetProject : MSBuildNuGetProject
     {
         private readonly EnvDTEProject _project;
 
-        public MSBuildNuGetProjectSystem(
+        public VSMSBuildNuGetProject(
             EnvDTEProject project,
             IMSBuildNuGetProjectSystem msbuildNuGetProjectSystem,
             string folderNuGetProjectPath,
