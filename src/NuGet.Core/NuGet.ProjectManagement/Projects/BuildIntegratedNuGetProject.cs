@@ -119,7 +119,7 @@ namespace NuGet.ProjectManagement.Projects
             var lockFileFormat = new LockFileFormat();
             var lockFile = lockFileFormat.Read(lockFilePath, context.Logger);
 
-            var packageSpec = context.GetOrCreateSpec(ProjectName, JsonConfigPath);
+            var packageSpec = GetPackageSpecForRestore(context);
 
             if (!lockFile.IsValidForPackageSpec(packageSpec, LockFileFormat.Version))
             {

@@ -24,9 +24,6 @@ namespace NuGet.ProjectManagement
 
             ClosureCache = new Dictionary<string, IReadOnlyList<ExternalProjectReference>>(
                 StringComparer.OrdinalIgnoreCase);
-
-            SpecCache = new Dictionary<string, PackageSpec>(
-                StringComparer.OrdinalIgnoreCase);
         }
 
         /// <summary>
@@ -40,32 +37,8 @@ namespace NuGet.ProjectManagement
         public IDictionary<string, IReadOnlyList<ExternalProjectReference>> ClosureCache { get; }
 
         /// <summary>
-        /// Cached project.json files
-        /// </summary>
-        public IDictionary<string, PackageSpec> SpecCache { get; }
-
-        /// <summary>
         /// Logger
         /// </summary>
         public ILogger Logger { get; }
-
-        /// <summary>
-        /// Retrieves a project.json file from the cache. It will be added if it does not exist already.
-        /// </summary>
-        public PackageSpec GetOrCreateSpec(string projectName, string projectJsonPath)
-        {
-            PackageSpec spec;
-            if (!SpecCache.TryGetValue(projectJsonPath, out spec))
-            {
-                // Read the spec and add it to the cache
-                spec = JsonPackageSpecReader.GetPackageSpec(
-                    projectName,
-                    projectJsonPath);
-
-                SpecCache.Add(projectJsonPath, spec);
-            }
-
-            return spec;
-        }
     }
 }
