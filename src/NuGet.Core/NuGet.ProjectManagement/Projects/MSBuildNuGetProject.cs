@@ -63,7 +63,7 @@ namespace NuGet.ProjectManagement
         public PackagesConfigNuGetProject PackagesConfigNuGetProject { get; }
 
         public string MSBuildProjectPath => MSBuildNuGetProjectSystem.ProjectFileFullPath;
-        public DateTimeOffset LastModified => DateTimeOffset.Now;
+        public DateTimeOffset LastModified => DateTimeOffset.MinValue;
 
         private readonly IDictionary<FileTransformExtensions, IPackageFileTransformer> FileTransformers =
             new Dictionary<FileTransformExtensions, IPackageFileTransformer>
@@ -627,7 +627,7 @@ namespace NuGet.ProjectManagement
             ISet<PackageIdentity> packagesChecked,
             ExternalProjectReferenceContext context)
         {
-            return true;
+            return false;
         }
 
         public virtual Task<IReadOnlyList<ExternalProjectReference>> GetProjectReferenceClosureAsync(
