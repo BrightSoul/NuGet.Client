@@ -4,7 +4,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace NuGet.PackageManagement
+namespace NuGet.ProjectModel
 {
     /// <summary>
     /// Represents the state of a build integrated project.

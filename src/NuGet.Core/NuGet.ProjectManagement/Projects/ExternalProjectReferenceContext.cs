@@ -24,6 +24,9 @@ namespace NuGet.ProjectManagement
 
             ClosureCache = new Dictionary<string, IReadOnlyList<ExternalProjectReference>>(
                 StringComparer.OrdinalIgnoreCase);
+
+            ProjectCache = new Dictionary<string, DependencyGraphProjectCacheEntry>(
+                StringComparer.OrdinalIgnoreCase);
         }
 
         /// <summary>
@@ -35,6 +38,13 @@ namespace NuGet.ProjectManagement
         /// A cache of the full closure of project references. The key is the full path to the project.
         /// </summary>
         public IDictionary<string, IReadOnlyList<ExternalProjectReference>> ClosureCache { get; }
+
+        /// <summary>
+        /// A cache of the files in a project that can have references and a last modified time. In practice, this is
+        /// a list of all project.json and MSBuild project files in a closure. The key is the full path to the MSBuild
+        /// project file.
+        /// </summary>
+        public Dictionary<string, DependencyGraphProjectCacheEntry> ProjectCache { get; set; }
 
         /// <summary>
         /// Logger

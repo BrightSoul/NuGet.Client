@@ -6,8 +6,6 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
-using NuGet.Packaging;
-using NuGet.Packaging.Core;
 using NuGet.ProjectManagement;
 using NuGet.ProjectModel;
 
@@ -21,7 +19,7 @@ namespace NuGet.PackageManagement
         /// </summary>
         public static async Task<Dictionary<string, DependencyGraphProjectCacheEntry>>
             CreateDependencyGraphProjectCache(
-                IReadOnlyList<IDependencyGraphProject> projects,
+                IEnumerable<IDependencyGraphProject> projects,
                 ExternalProjectReferenceContext context)
         {
             var cache = new Dictionary<string, DependencyGraphProjectCacheEntry>();
@@ -100,23 +98,6 @@ namespace NuGet.PackageManagement
 
             // no project changes have occurred
             return false;
-        }
-
-        /// <summary>
-        /// Validate that all project.lock.json files are validate for the project.json files,
-        /// and that no packages are missing.
-        /// If a full restore is required this will return false.
-        /// </summary>
-        /// <remarks>Floating versions and project.json files with supports require a full restore.</remarks>
-        public static bool IsRestoreRequired(
-            IReadOnlyList<IDependencyGraphProject> projects,
-            IReadOnlyList<string> packageFolderPaths,
-            ExternalProjectReferenceContext context)
-        {
-            var packagesChecked = new HashSet<PackageIdentity>();
-            var pathResolvers = packageFolderPaths.Select(path => new VersionFolderPathResolver(path));
-
-            return projects.Any(p => p.IsRestoreRequired(pathResolvers, packagesChecked, context));
         }
 
         /// <summary>

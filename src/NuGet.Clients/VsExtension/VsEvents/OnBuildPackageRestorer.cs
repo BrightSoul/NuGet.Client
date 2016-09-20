@@ -235,7 +235,6 @@ namespace NuGetVSExtension
                         .ToList();
 
                     await RestorePackageSpecProjectsAsync(
-                        solutionDirectory,
                         dependencyGraphProjects,
                         forceRestore,
                         isSolutionAvailable);
@@ -291,7 +290,6 @@ namespace NuGetVSExtension
         }
         
         private async Task RestorePackageSpecProjectsAsync(
-            string solutionDirectory,
             List<IDependencyGraphProject> projects,
             bool forceRestore,
             bool isSolutionAvailable)
@@ -326,9 +324,14 @@ namespace NuGetVSExtension
 
                 // Cache p2ps discovered from DTE 
                 var referenceContext = new ExternalProjectReferenceContext(logger: this);
+                var pathContext = NuGetPathContext.Create(Settings);
 
                 // No-op all project closures are up to date and all packages exist on disk.
-                if (await IsRestoreRequired(projects, forceRestore, referenceContext))
+                if (await DependencyGraphRestoreUtility.IsRestoreRequiredAsync(
+                    projects,
+                    forceRestore,
+                    pathContext,
+                    referenceContext))
                 {
                     var waitDialogFactory = ServiceLocator
                         .GetGlobalService<SVsThreadedWaitDialogFactory, IVsThreadedWaitDialogFactory>();
@@ -351,157 +354,18 @@ namespace NuGetVSExtension
                         Token = threadedWaitDialogSession.UserCancellationToken;
                         ThreadedWaitDialogProgress = threadedWaitDialogSession.Progress;
                         
-                        var enabledSources = SourceRepositoryProvider.GetRepositories().ToList();
-                        var pathContext = NuGetPathContext.Create(Settings);
-                        var dgSpec = new DependencyGraphSpec();
-                        foreach (var project in projects)
-                        {
-                            var packageSpec = project.GetPackageSpecForRestore(referenceContext);
+                        var sources = SourceRepositoryProvider
+                            .GetRepositories()
+                            .Select(s => s.PackageSource.Source)
+                            .ToList();
 
-                            dgSpec.AddProject(packageSpec);
-
-                            if (packageSpec.RestoreMetadata.OutputType == RestoreOutputType.NETCore ||
-                                packageSpec.RestoreMetadata.OutputType == RestoreOutputType.UAP)
-                            {
-                                dgSpec.AddRestore(packageSpec.RestoreMetadata.ProjectUniqueName);
-                            }
-                        }
-
-                        using (var cacheContext = new SourceCacheContext())
-                        {
-                            var providers = new List<IPreLoadedRestoreRequestProvider>();
-                            var providerCache = new RestoreCommandProvidersCache();
-                            providers.Add(new DependencyGraphSpecRequestProvider(providerCache, dgSpec));
-                            
-                            var sourceProvider = new CachingSourceProvider(new PackageSourceProvider(Settings));
-
-                            var restoreContext = new RestoreArgs()
-                            {
-                                CacheContext = cacheContext,
-                                LockFileVersion = LockFileFormat.Version,
-                                ConfigFile = null,
-                                DisableParallel = false,
-                                GlobalPackagesFolder = pathContext.UserPackageFolder,
-                                Log = this,
-                                MachineWideSettings = new XPlatMachineWideSetting(),
-                                PreLoadedRequestProviders = providers,
-                                CachingSourceProvider = sourceProvider,
-                                Sources = enabledSources.Select(source => source.PackageSource.Source).ToList()
-                            };
-
-                            var restoreSummaries = await RestoreRunner.Run(restoreContext);
-
-                            // Summary
-                            RestoreSummary.Log(this, restoreSummaries);
-                        }
+                        await DependencyGraphRestoreUtility.RestoreAsync(
+                            projects,
+                            sources,
+                            Settings,
+                            referenceContext);
                     }
                 }
-            }
-        }
-
-        /// <summary>
-        /// Determine if a full restore is required. For scenarios with no floating versions
-        /// where all packages are already on disk and no server requests are needed
-        /// we can skip the restore after some validation checks.
-        /// </summary>
-        private async Task<bool> IsRestoreRequired(
-            List<IDependencyGraphProject> projects,
-            bool forceRestore,
-            ExternalProjectReferenceContext referenceContext)
-        {
-            try
-            {
-                // Swap caches 
-                var oldCache = _dependencyGraphProjectCache;
-                _dependencyGraphProjectCache
-                    = await DependencyGraphProjectCacheUtility.CreateDependencyGraphProjectCache(
-                        projects,
-                        referenceContext);
-
-                if (forceRestore)
-                {
-                    // The cache has been updated, now skip the check since we are doing a restore anyways.
-                    return true;
-                }
-
-                if (DependencyGraphProjectCacheUtility.CacheHasChanges(oldCache, _dependencyGraphProjectCache))
-                {
-                    // A new project has been added
-                    return true;
-                }
-
-                // Read package folder locations
-                var nugetPaths = NuGetPathContext.Create(Settings);
-                var packageFolderPaths = new List<string>();
-
-                // Folder paths must be in order of priority
-                packageFolderPaths.Add(nugetPaths.UserPackageFolder);
-                packageFolderPaths.AddRange(nugetPaths.FallbackPackageFolders);
-
-                // Verify all packages exist and have the expected hashes
-                var restoreRequired = DependencyGraphProjectCacheUtility.IsRestoreRequired(
-                    projects,
-                    packageFolderPaths,
-                    referenceContext);
-
-                if (restoreRequired)
-                {
-                    // The project.json file does not match the lock file
-                    return true;
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.Fail("Unable to validate lock files.");
-
-                ActivityLog.LogError(LogEntrySource, ex.ToString());
-
-                WriteLine(VerbosityLevel.Diagnostic, "{0}", ex.ToString());
-
-                // If we are unable to validate, run a full restore
-                // This may occur if the lock files are corrupt
-                return true;
-            }
-
-            // Validation passed, no restore is needed
-            return false;
-        }
-
-        private async Task BuildIntegratedProjectReportErrorAsync(string projectName,
-            RestoreResult restoreResult,
-            CancellationToken token)
-        {
-            Debug.Assert(!restoreResult.Success);
-
-            if (token.IsCancellationRequested)
-            {
-                // If an operation is canceled, a single message gets shown in the summary
-                // that package restore has been canceled. Do not report it as separate errors
-                _canceled = true;
-                return;
-            }
-
-            // HasErrors will be used to show a message in the output window, that, Package restore failed
-            // If Canceled is not already set to true
-            _hasErrors = true;
-
-            // Switch to main thread to update the error list window or output window
-            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-
-            foreach (var libraryRange in restoreResult.GetAllUnresolved())
-            {
-                var message = string.Format(CultureInfo.CurrentCulture,
-                    Resources.BuildIntegratedPackageRestoreFailedForProject,
-                    projectName,
-                    libraryRange.ToString());
-
-                WriteLine(VerbosityLevel.Quiet, message);
-
-                MessageHelper.ShowError(_errorListProvider,
-                    TaskErrorCategory.Error,
-                    TaskPriority.High,
-                    message,
-                    hierarchyItem: null);
             }
         }
 

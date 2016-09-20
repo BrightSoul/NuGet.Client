@@ -117,8 +117,17 @@ namespace NuGet.ProjectManagement.Projects
             }
 
             var lockFileFormat = new LockFileFormat();
-            var lockFile = lockFileFormat.Read(lockFilePath, context.Logger);
-
+            LockFile lockFile;
+            try
+            {
+                lockFile = lockFileFormat.Read(lockFilePath, context.Logger);
+            }
+            catch
+            {
+                // If the lock file is invalid, then restore.
+                return true;
+            }
+            
             var packageSpec = GetPackageSpecForRestore(context);
 
             if (!lockFile.IsValidForPackageSpec(packageSpec, LockFileFormat.Version))
