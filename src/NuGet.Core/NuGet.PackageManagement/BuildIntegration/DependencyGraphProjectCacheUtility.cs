@@ -73,6 +73,11 @@ namespace NuGet.PackageManagement
             IReadOnlyDictionary<string, DependencyGraphProjectCacheEntry> previousCache,
             IReadOnlyDictionary<string, DependencyGraphProjectCacheEntry> currentCache)
         {
+            if (previousCache == null)
+            {
+                return true;
+            }
+
             foreach (var item in currentCache)
             {
                 var projectName = item.Key;

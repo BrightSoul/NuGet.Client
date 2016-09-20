@@ -7,10 +7,14 @@ namespace NuGet.ProjectManagement
 {
     public class ExternalProjectReferenceContext
     {
-        /// <summary>
-        /// Create a new build integrated project reference context and caches.
-        /// </summary>
         public ExternalProjectReferenceContext(ILogger logger)
+            : this(projectCache: null, logger: logger)
+        {
+        }
+        
+        public ExternalProjectReferenceContext(
+            Dictionary<string, DependencyGraphProjectCacheEntry> projectCache,
+            ILogger logger)
         {
             if (logger == null)
             {
@@ -25,7 +29,7 @@ namespace NuGet.ProjectManagement
             ClosureCache = new Dictionary<string, IReadOnlyList<ExternalProjectReference>>(
                 StringComparer.OrdinalIgnoreCase);
 
-            ProjectCache = new Dictionary<string, DependencyGraphProjectCacheEntry>(
+            ProjectCache = projectCache ?? new Dictionary<string, DependencyGraphProjectCacheEntry>(
                 StringComparer.OrdinalIgnoreCase);
         }
 

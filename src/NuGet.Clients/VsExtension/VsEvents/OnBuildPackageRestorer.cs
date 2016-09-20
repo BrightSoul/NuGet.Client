@@ -3,7 +3,6 @@
 
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -15,17 +14,13 @@ using Microsoft.VisualStudio;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
 using Microsoft.VisualStudio.Threading;
-using NuGet.Commands;
 using NuGet.Common;
 using NuGet.Configuration;
-using NuGet.LibraryModel;
 using NuGet.PackageManagement;
 using NuGet.PackageManagement.VisualStudio;
-using NuGet.Packaging;
 using NuGet.ProjectManagement;
 using NuGet.ProjectManagement.Projects;
 using NuGet.ProjectModel;
-using NuGet.Protocol;
 using NuGet.Protocol.Core.Types;
 using Task = System.Threading.Tasks.Task;
 
@@ -323,7 +318,9 @@ namespace NuGetVSExtension
                 }
 
                 // Cache p2ps discovered from DTE 
-                var referenceContext = new ExternalProjectReferenceContext(logger: this);
+                var referenceContext = new ExternalProjectReferenceContext(
+                    _dependencyGraphProjectCache,
+                    logger: this);
                 var pathContext = NuGetPathContext.Create(Settings);
 
                 // No-op all project closures are up to date and all packages exist on disk.
@@ -333,6 +330,9 @@ namespace NuGetVSExtension
                     pathContext,
                     referenceContext))
                 {
+                    // Save the project between operations.
+                    _dependencyGraphProjectCache = referenceContext.ProjectCache;
+
                     var waitDialogFactory = ServiceLocator
                         .GetGlobalService<SVsThreadedWaitDialogFactory, IVsThreadedWaitDialogFactory>();
 
